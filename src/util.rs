@@ -130,6 +130,41 @@ pub fn probe_dns(name: &str) -> bool {
     (name, 443).to_socket_addrs().map(|mut found| found.next().is_some()).unwrap_or(false)
 }
 
+
+/// `ssh-keygen -lf authorized_keys`: impressão digital → comentário (o nome do aparelho, quando há).
+pub fn parse_key_fingerprints(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let _bits = fields.next()?;
+            let fingerprint = fields.next().filter(|value| value.starts_with("SHA256:"))?;
+            let rest: Vec<&str> = fields.collect();
+            // O último campo é o tipo entre parênteses: "(ED25519)".
+            let comment = rest.split_last().map(|(_, comment)| comment.join(" ")).unwrap_or_default();
+            if comment.is_empty() || comment == "no comment" {
+                return None;
+            }
+            Some((fingerprint.to_string(), comment))
+        })
+        .collect()
+}
+
+/// Rótulos das chaves autorizadas nas pastas pessoais dadas.
+pub fn key_labels(homes: &[std::path::PathBuf]) -> std::collections::HashMap<String, String> {
+    let mut labels = std::collections::HashMap::new();
+    for home in homes {
+        let file = home.join(".ssh/authorized_keys");
+        if !file.is_file() {
+            continue;
+        }
+        let Some(text) = run("ssh-keygen", &["-lf", &file.to_string_lossy()], Duration::from_secs(5)) else { continue };
+        for (fingerprint, comment) in parse_key_fingerprints(&text) {
+            labels.entry(fingerprint).or_insert(comment);
+        }
+    }
+    labels
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,6 +176,15 @@ mod tests {
         assert!(run("nao-existe-esse-comando", &[], Duration::from_secs(1)).is_none());
         assert!(run_ok("true", &[], Duration::from_secs(1)));
         assert!(!run_ok("false", &[], Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn key_fingerprints() {
+        let text = "256 SHA256:sWIv+vMr lucaseufrasio@ursoc (ED25519)\n3072 SHA256:A6TE ssh-key-2021-05-03 (RSA)\n256 SHA256:kO1E no comment (ED25519)\nlixo\n";
+        assert_eq!(
+            parse_key_fingerprints(text),
+            vec![("SHA256:sWIv+vMr".into(), "lucaseufrasio@ursoc".into()), ("SHA256:A6TE".into(), "ssh-key-2021-05-03".into())]
+        );
     }
 
     #[test]

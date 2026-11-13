@@ -192,7 +192,7 @@ fn ssh_attempts(facts: &Facts) -> Check {
         plural(attempts.addresses, "endereço", "endereços"),
     );
     if !attempts.top_addresses.is_empty() {
-        let top: Vec<String> = attempts.top_addresses.iter().map(|(ip, total)| format!("{ip} ({})", count(*total))).collect();
+        let top: Vec<String> = attempts.top_addresses.iter().map(|(ip, total)| format!("{ip} ({}, {})", network(ip), count(*total))).collect();
         detail.push_str(&format!("; mais insistentes: {}", top.join(", ")));
     }
     if !attempts.top_users.is_empty() {
@@ -293,7 +293,7 @@ fn count(value: i64) -> String {
     let digits = value.unsigned_abs().to_string();
     let mut out = String::new();
     for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index) % 3 == 0 {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
             out.push('.');
         }
         out.push(digit);
@@ -414,7 +414,7 @@ mod tests {
         };
         let check = ssh_attempts(&facts(&ssh, &labels, Some(false)));
         assert_eq!(check.state, State::Atencao);
-        assert!(check.detail.contains("2.739 tentativas de 53 endereços; mais insistentes: 203.0.113.7 (900); usuários mais tentados: root, admin"));
+        assert!(check.detail.contains("2.739 tentativas de 53 endereços; mais insistentes: 203.0.113.7 (internet, 900); usuários mais tentados: root, admin"));
 
         let banned = Fail2ban { jail: "sshd".into(), currently_banned: 4, total_banned: 12, currently_failed: 0 };
         let mut with_fail2ban = facts(&ssh, &labels, Some(false));

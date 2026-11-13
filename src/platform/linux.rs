@@ -350,3 +350,26 @@ pub fn extras(conn: &Connection, now: i64, sample: &Sample, config: &Config) -> 
 pub fn diagnose() -> Vec<String> {
     vec![format!("/proc/stat cpu: {:?}", read("/proc/stat").and_then(|text| parse::proc_stat_cpu(&text)))]
 }
+
+pub fn failed_units() -> Option<Vec<String>> {
+    run("systemctl", &["list-units", "--state=failed", "--no-legend", "--plain"], SHORT).map(|text| parse::failed_units(&text))
+}
+
+/// Processos que o kernel encerrou por falta de memória nas últimas 24 horas.
+pub fn oom_kills() -> Option<Vec<(String, i64)>> {
+    run("journalctl", &["-k", "--since", "-24h", "--no-pager", "-o", "cat", "--lines=20000"], SLOW).map(|text| parse::oom_kills(&text))
+}
+
+/// Pastas pessoais de quem tem shell: as chaves autorizadas delas dão nome aos aparelhos.
+pub fn key_labels() -> HashMap<String, String> {
+    let homes: Vec<std::path::PathBuf> = read("/etc/passwd")
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split(':').collect();
+            let (home, shell) = (fields.get(5)?, fields.get(6)?);
+            (!shell.ends_with("nologin") && !shell.ends_with("false")).then(|| std::path::PathBuf::from(home))
+        })
+        .collect();
+    util::key_labels(&homes)
+}

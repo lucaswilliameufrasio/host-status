@@ -285,6 +285,27 @@ pub fn cpu_model(cpuinfo: &str) -> Option<String> {
     })
 }
 
+
+/// `systemctl list-units --state=failed --no-legend --plain`: o nome é a primeira coluna.
+pub fn failed_units(text: &str) -> Vec<String> {
+    text.lines().filter_map(|line| line.split_whitespace().next()).filter(|name| name.contains('.')).map(String::from).collect()
+}
+
+/// Linhas do kernel "... Killed process 1234 (nome) ...": quantas vezes cada processo morreu.
+pub fn oom_kills(text: &str) -> Vec<(String, i64)> {
+    let mut found: Vec<(String, i64)> = Vec::new();
+    for line in text.lines() {
+        let Some(tail) = line.split_once("Killed process ").map(|(_, tail)| tail) else { continue };
+        let Some(name) = tail.split_once('(').and_then(|(_, rest)| rest.split_once(')')).map(|(name, _)| name) else { continue };
+        match found.iter_mut().find(|(known, _)| known == name) {
+            Some((_, total)) => *total += 1,
+            None => found.push((name.to_string(), 1)),
+        }
+    }
+    found.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,6 +365,18 @@ mod tests {
     fn process_table() {
         let rows = processes(" %CPU %MEM COMMAND\n 12.5  3.0 Google Chrome\n  1.0  0.1 zsh\n", 1);
         assert_eq!(rows, vec![Process { cpu_pct: 12.5, mem_pct: 3.0, name: "Google Chrome".into() }]);
+    }
+
+    #[test]
+    fn failed_units_and_oom() {
+        let units = failed_units("backup.service loaded failed failed Backup\nnfs.mount loaded failed failed NFS\n");
+        assert_eq!(units, vec!["backup.service".to_string(), "nfs.mount".to_string()]);
+        assert!(failed_units("").is_empty());
+        let kernel = "Memory cgroup out of memory: Killed process 1383164 (host-status) total-vm:90000kB\n\
+                      oom_reaper: reaped process 1383164 (host-status)\n\
+                      Out of memory: Killed process 77 (java) total-vm:1kB\n\
+                      Memory cgroup out of memory: Killed process 1383200 (host-status) total-vm:90000kB\n";
+        assert_eq!(oom_kills(kernel), vec![("host-status".to_string(), 2), ("java".to_string(), 1)]);
     }
 
     #[test]
