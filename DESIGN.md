@@ -88,6 +88,7 @@ MUST NOT
 
 ## Telas fora do papel das referências
 - Nenhuma. A página é uma só. "Aparelhos na rede" (Linux) segue as tabelas de C.
+- "Leitura" (conclusões tiradas dos registros) e "Quem entrou" (SSH) seguem as tabelas de C e o mesmo formato estado/item/detalhe das proteções; problema e atenção vêm primeiro.
 
 ## Checklist
 - [ ] Toda cor, tamanho e raio vem de token.
@@ -98,3 +99,4 @@ MUST NOT
 - 2026-11-11: referências A, B e C escolhidas; tokens medidos; página reestilizada.
 - 2026-11-12: página movida para o host-status (Rust). Módulos genéricos por sistema: partes de CPU e memória vêm do coletor; temperatura, internet, fail2ban e aparelhos na rede no Linux.
 - 2026-11-11: primeira versão rejeitada pelo dono (três linguagens desconectadas, validação só do topo). Refeita: módulos de B fiéis ao Stats, cores de série compartilhadas entre módulos e gráficos, SSH agrupado, acari em português, revisão da página inteira.
+- 2026-11-13: card "Leitura" abaixo do cabeçalho e tabela "Quem entrou" no SSH, conferidos em 1280 (claro e escuro) e 390.

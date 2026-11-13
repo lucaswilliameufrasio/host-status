@@ -77,7 +77,8 @@ pub fn full_document(conn: &Connection, config: &Config, now: i64, sample: Sampl
     ssh_view["sessions"] = json!(ssh::parse_who(&util::run("who", &[], Duration::from_secs(5)).unwrap_or_default()));
     ssh_view["error"] = json!(ssh_error);
     let mut posture = platform::posture(config);
-    posture.extend(checks::service_checks(&config.services));
+    let listeners = platform::listeners();
+    posture.extend(checks::service_checks(&config.services, &listeners));
     let extras = platform::extras(conn, now, &sample, config);
     let memory_labels: Vec<String> = sample
         .memory
@@ -85,7 +86,6 @@ pub fn full_document(conn: &Connection, config: &Config, now: i64, sample: Sampl
         .map(|memory| memory.parts.iter().take(3).map(|part| part.label.clone()).collect())
         .unwrap_or_default();
     let network = network(sample.gateway.as_deref());
-    let listeners = platform::listeners();
     let (seen_listeners, listeners_since) = store::record_listeners(conn, now, &listeners)?;
     let ssh_facts = store::ssh_facts(conn, now)?;
     let key_labels = platform::key_labels();

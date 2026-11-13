@@ -610,20 +610,39 @@ function renderCharts(data) {
 
 /* ---------- C: tabelas das seções ---------- */
 
-function renderPosture(data) {
-  const checks = data.posture;
+function checkSummary(checks, allClear) {
   const problems = checks.filter((item) => item.state === "problema").length;
   const warnings = checks.filter((item) => item.state === "atencao").length;
   const parts = [];
   if (problems > 0) parts.push(problems === 1 ? "1 problema" : problems + " problemas");
   if (warnings > 0) parts.push(warnings === 1 ? "1 ponto de atenção" : warnings + " pontos de atenção");
-  document.getElementById("posture-summary").textContent =
-    parts.length > 0 ? parts.join(" e ") + "." : "Tudo em ordem.";
-  const nodes = [table(
+  return parts.length > 0 ? parts.join(" e ") + "." : allClear;
+}
+
+function checkTable(checks, emptyText) {
+  return table(
     [{ label: "Estado", width: "120px" }, { label: "Item" }, { label: "Detalhe" }],
     checks.map((item) => [withDot(STATE_DOT[item.state], STATE_LABEL[item.state] || item.state), item.label, item.detail]),
-    "Sem verificações.",
-  )];
+    emptyText,
+  );
+}
+
+function renderReadings(data) {
+  const readings = data.readings || [];
+  document.getElementById("readings-card").hidden = readings.length === 0;
+  if (readings.length === 0) return;
+  // Problemas e atenção primeiro: é o que pede ação.
+  const order = { problema: 0, atencao: 1, desconhecido: 2, ok: 3 };
+  const sorted = readings.slice().sort((a, b) => (order[a.state] ?? 4) - (order[b.state] ?? 4));
+  document.getElementById("readings-summary").textContent = checkSummary(readings, "Nada fora do normal nos registros.");
+  replace("readings", checkTable(sorted, ""));
+}
+
+function renderPosture(data) {
+  const checks = data.posture;
+  const problems = checks.filter((item) => item.state === "problema").length;
+  document.getElementById("posture-summary").textContent = checkSummary(checks, "Tudo em ordem.");
+  const nodes = [checkTable(checks, "Sem verificações.")];
   if (problems > 0 && data.platform === "macos") {
     const hint = el("p", "Para corrigir, rode no Mac: ", "note");
     hint.append(command("sudo bash ~/.local/share/macos-setup/harden.sh"));
@@ -696,6 +715,31 @@ function renderSsh(data) {
   }
   if (ssh.since_ts) nodes.push(el("p", "Registro desde " + clock(ssh.since_ts) + ".", "note"));
   replace("ssh-events", ...nodes);
+
+  const who = ssh.who || [];
+  const mostEntries = Math.max(1, ...who.map((item) => item.entries));
+  replace("ssh-who", table(
+    [{ label: "Usuário" }, { label: "Aparelho" }, { label: "Origens" }, { label: "Entradas", width: "110px" }],
+    who.map((item) => {
+      let device;
+      if (item.method !== "publickey") {
+        device = withDot("bad", item.method === "password" ? "senha" : item.method || "sem chave");
+      } else if (item.device) {
+        device = item.device;
+      } else {
+        device = el("span", shortKey(item.key), "chip");
+        device.title = item.key;
+      }
+      const origins = el("span", null, "origins");
+      for (const origin of item.origins) {
+        const line = el("span", origin.ip);
+        line.append(el("span", " " + origin.network + " · " + origin.entries, "count"));
+        origins.append(line);
+      }
+      return [item.user, device, origins, proportion(item.entries, mostEntries, String(item.entries))];
+    }),
+    "Ninguém entrou nos últimos 7 dias.",
+  ));
 
   const busiest = Math.max(1, ...ssh.origins_7d.map((origin) => Math.max(origin.accepted, origin.refused)));
   replace("ssh-origins", table(
@@ -849,6 +893,7 @@ function renderFull(data) {
     renderNow(lastLive);
   }
   renderCharts(data);
+  renderReadings(data);
   renderPosture(data);
   renderSsh(data);
   renderCleanup(data);

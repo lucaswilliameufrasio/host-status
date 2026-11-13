@@ -8,6 +8,7 @@ Um binário que coleta métricas, acessos SSH e checagens de proteção de uma m
 - **Histórico** de 1 h e 24 h: CPU, memória empilhada, carga, rede.
 - **Acesso remoto e proteção**: `sshd` (senha, root, `AllowUsers`), firewall, fail2ban, atualizações automáticas e pendentes, reinício pendente; no macOS, compartilhamento de tela, Remote Apple Events, FileVault, SIP e apps de acesso remoto. Mais os serviços declarados na configuração, checados por porta.
 - **SSH**: entradas, falhas e conexões sem login, agrupadas, com origem e chave; origens dos últimos 7 dias; sessões abertas.
+- **Leitura**: conclusões tiradas dos registros, com estado. Quem entrou por SSH em 7 dias (todas por chave? de quais origens e redes? com quais aparelhos, pelo comentário da chave em `authorized_keys`), tentativas sem login em 24 h (quantas, de quantos endereços, os mais insistentes e os usuários mais tentados, pesadas contra senha liberada e fail2ban), serviços do systemd em falha, processos mortos por falta de memória, portas novas abertas para qualquer rede e aparelhos novos na rede.
 - **Processos**, **portas abertas** fora do loopback, **aparelhos na rede** (Linux, opcional: fping + ARP, fabricante pelo `ieee-data`) e o resumo do [acari](https://github.com/lucaswilliameufrasio/acari) quando instalado.
 
 ## Consumo

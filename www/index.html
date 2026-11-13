@@ -25,6 +25,12 @@
       </label>
     </header>
 
+    <section class="card" id="readings-card" aria-labelledby="h-readings" hidden>
+      <h2 id="h-readings">Leitura</h2>
+      <p class="sub" id="readings-summary">Conclusões tiradas dos registros desta máquina</p>
+      <div id="readings"></div>
+    </section>
+
     <section class="modules" id="now" aria-label="Agora"></section>
 
     <section class="grid" id="charts" aria-label="Histórico"></section>
@@ -71,7 +77,9 @@
           <div id="ssh-events"></div>
         </div>
         <div>
-          <h3 class="first">Origens nos últimos 7 dias</h3>
+          <h3 class="first">Quem entrou nos últimos 7 dias</h3>
+          <div id="ssh-who"></div>
+          <h3>Origens nos últimos 7 dias</h3>
           <div id="ssh-origins"></div>
           <h3>Sessões abertas</h3>
           <div id="ssh-sessions"></div>

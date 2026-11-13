@@ -197,6 +197,8 @@ th:last-child, td:last-child { padding-right: 0; }
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); white-space: nowrap;
 }
 .count { color: var(--text-2); margin-left: 6px; }
+.origins { display: flex; flex-direction: column; gap: 2px; }
+.origins .count { margin-left: 0; }
 
 /* Identidade: comando colável */
 .cmd {
