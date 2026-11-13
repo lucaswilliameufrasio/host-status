@@ -52,7 +52,7 @@ sudo bash install-linux.sh             # ou: su - -c 'bash /caminho/install-linu
 sudo bash install-linux.sh --rollback
 ```
 
-Roda como root, porque o journal do sshd, `sshd -T`, o fail2ban e o dono de cada porta só aparecem para root. O unit fecha o resto: sistema de arquivos só leitura (exceto `/var/lib/host-status`), sem novos privilégios, até 64 MB de memória e 20% de CPU. O instalador desliga o painel antigo em Python (timer e Caddy) quando encontra, libera a porta na `tailscale0` se o ufw estiver ativo, e para o serviço se a porta abrir em todas as interfaces.
+Roda como root, porque o journal do sshd, `sshd -T`, o fail2ban e o dono de cada porta só aparecem para root. O unit fecha o resto: sistema de arquivos só leitura (exceto `/var/lib/host-status`), sem novos privilégios, até 64 MB de memória e 20% de CPU. O instalador desliga o painel antigo em Python (timer e Caddy) quando encontra, libera a porta na `tailscale0` se o ufw estiver ativo (ou só para `100.64.0.0/10` no firewalld), e para o serviço se a porta abrir em todas as interfaces.
 
 ### macOS (LaunchAgent, sem sudo)
 

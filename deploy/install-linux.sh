@@ -18,6 +18,13 @@ if [ "${1:-}" = "--rollback" ]; then
   systemctl disable --now host-status.service 2>/dev/null || true
   rm -f /etc/systemd/system/host-status.service
   systemctl daemon-reload
+  if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1 && [ -f /etc/host-status/config.json ]; then
+    for port in $(grep -oE '"tailscale:[0-9]+"' /etc/host-status/config.json | grep -oE '[0-9]+'); do
+      rule="rule family=\"ipv4\" source address=\"100.64.0.0/10\" port port=\"$port\" protocol=\"tcp\" accept"
+      firewall-cmd --permanent --remove-rich-rule="$rule" >/dev/null 2>&1 || true
+      firewall-cmd --remove-rich-rule="$rule" >/dev/null 2>&1 || true
+    done
+  fi
   if [ -f "$MIGRATED" ]; then
     while read -r unit; do
       [ -n "$unit" ] && systemctl enable --now "$unit" && echo "religado: $unit"
@@ -74,6 +81,16 @@ if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active
   for port in $(grep -oE '"tailscale:[0-9]+"' "$SOURCE/config.json" | grep -oE '[0-9]+'); do
     ufw allow in on tailscale0 to any port "$port" proto tcp comment host-status >/dev/null
     echo "ufw: liberada a porta $port só na tailscale0"
+  done
+fi
+
+# Portas da Tailscale no firewalld (Oracle Cloud e afins): só a faixa da Tailscale, nunca a internet.
+if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+  for port in $(grep -oE '"tailscale:[0-9]+"' "$SOURCE/config.json" | grep -oE '[0-9]+'); do
+    rule="rule family=\"ipv4\" source address=\"100.64.0.0/10\" port port=\"$port\" protocol=\"tcp\" accept"
+    firewall-cmd --permanent --add-rich-rule="$rule" >/dev/null
+    firewall-cmd --add-rich-rule="$rule" >/dev/null
+    echo "firewalld: liberada a porta $port só para 100.64.0.0/10"
   done
 fi
 
