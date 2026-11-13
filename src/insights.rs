@@ -184,6 +184,16 @@ fn ssh_attempts(facts: &Facts) -> Check {
     if attempts.total == 0 {
         return Check::new(ID, LABEL, State::Ok, "nenhuma tentativa sem login nas últimas 24 horas");
     }
+    let mut by_network: Vec<(&str, i64)> = Vec::new();
+    for (ip, total) in &attempts.per_address {
+        let kind = network(ip);
+        match by_network.iter_mut().find(|(known, _)| *known == kind) {
+            Some((_, sum)) => *sum += total,
+            None => by_network.push((kind, *total)),
+        }
+    }
+    by_network.sort_by_key(|(_, total)| std::cmp::Reverse(*total));
+    let from_internet: i64 = by_network.iter().filter(|(kind, _)| *kind == "internet").map(|(_, total)| total).sum();
     let mut detail = format!(
         "{} {} de {} {}",
         count(attempts.total),
@@ -191,6 +201,10 @@ fn ssh_attempts(facts: &Facts) -> Check {
         count(attempts.addresses),
         plural(attempts.addresses, "endereço", "endereços"),
     );
+    if !by_network.is_empty() {
+        let parts: Vec<String> = by_network.iter().map(|(kind, total)| format!("{kind} {}", count(*total))).collect();
+        detail.push_str(&format!(" ({})", parts.join(", ")));
+    }
     if !attempts.top_addresses.is_empty() {
         let top: Vec<String> = attempts.top_addresses.iter().map(|(ip, total)| format!("{ip} ({}, {})", network(ip), count(*total))).collect();
         detail.push_str(&format!("; mais insistentes: {}", top.join(", ")));
@@ -209,9 +223,12 @@ fn ssh_attempts(facts: &Facts) -> Check {
     }
     match facts.password_login {
         Some(true) => Check::new(ID, LABEL, State::Problema, format!("o SSH aceita senha e está recebendo tentativas: {detail}")),
-        Some(false) if facts.fail2ban.is_none() && attempts.total >= 100 => {
-            Check::new(ID, LABEL, State::Atencao, format!("só chave é aceita, mas sem fail2ban para barrar a insistência: {detail}"))
-        }
+        Some(false) if facts.fail2ban.is_none() && from_internet >= 100 => Check::new(
+            ID,
+            LABEL,
+            State::Atencao,
+            format!("só chave é aceita, mas sem fail2ban para barrar a insistência vinda da internet: {detail}"),
+        ),
         Some(false) => Check::new(ID, LABEL, State::Ok, format!("nenhuma tem como entrar, porque o SSH só aceita chave: {detail}")),
         None => Check::new(ID, LABEL, State::Atencao, detail),
     }
@@ -255,24 +272,53 @@ fn new_ports(facts: &Facts) -> Check {
     Check::new(ID, LABEL, State::Ok, format!("nenhuma porta nova; {} {} para qualquer rede", count(open), plural(open, "aberta", "abertas")))
 }
 
+/// Dias de registro antes de acusar aparelho novo: no começo, quem dorme vai aparecendo aos poucos.
+const DEVICE_LEARNING: i64 = 3 * DAY;
+
+/// MAC administrado localmente (segundo bit do primeiro octeto): o endereço aleatório que celulares
+/// e notebooks usam por privacidade e trocam de tempos em tempos.
+fn randomized_mac(mac: &str) -> bool {
+    u8::from_str_radix(mac.get(..2).unwrap_or(""), 16).is_ok_and(|octet| octet & 0x02 != 0)
+}
+
 fn new_devices(devices: &[Device], now: i64) -> Check {
     const ID: &str = "leitura_aparelhos";
     const LABEL: &str = "Aparelhos novos na rede (24 h)";
     let Some(since) = devices.iter().map(|item| item.first_seen).min() else {
         return Check::new(ID, LABEL, State::Ok, "nenhum aparelho registrado ainda");
     };
-    let fresh: Vec<String> = devices
+    let known = devices.len() as i64;
+    if now - since < DEVICE_LEARNING {
+        return Check::new(ID, LABEL, State::Ok, format!(
+            "aprendendo a rede: o registro tem menos de 3 dias; {} {} até agora",
+            count(known),
+            plural(known, "aparelho visto", "aparelhos vistos"),
+        ));
+    }
+    let fresh: Vec<&Device> = devices.iter().filter(|item| item.first_seen > since && item.first_seen >= now - DAY).collect();
+    let randomized = fresh.iter().filter(|item| randomized_mac(&item.mac)).count() as i64;
+    let fixed: Vec<String> = fresh
         .iter()
-        .filter(|item| item.first_seen > since && item.first_seen >= now - DAY)
+        .filter(|item| !randomized_mac(&item.mac))
         .map(|item| {
             let name = [&item.label, &item.vendor].into_iter().find(|text| !text.is_empty()).cloned().unwrap_or_else(|| "sem nome".into());
             format!("{name} em {} ({})", item.ip, item.mac)
         })
         .collect();
-    if fresh.is_empty() {
-        return Check::new(ID, LABEL, State::Ok, format!("nenhum aparelho novo; {} {} conhecidos", count(devices.len() as i64), plural(devices.len() as i64, "aparelho", "aparelhos")));
+    let random_note = if randomized > 0 {
+        format!("; {} com MAC aleatório (celulares e notebooks trocam de endereço)", count(randomized))
+    } else {
+        String::new()
+    };
+    if fixed.is_empty() {
+        return Check::new(ID, LABEL, State::Ok, format!("nenhum aparelho novo com MAC fixo; {} {} conhecidos{random_note}", count(known), plural(known, "aparelho", "aparelhos")));
     }
-    Check::new(ID, LABEL, State::Atencao, format!("{} {}: {}", fresh.len(), plural(fresh.len() as i64, "apareceu", "apareceram"), list_with_more(fresh.into_iter(), 5)))
+    Check::new(ID, LABEL, State::Atencao, format!(
+        "{} {}: {}{random_note}",
+        fixed.len(),
+        plural(fixed.len() as i64, "apareceu", "apareceram"),
+        list_with_more(fixed.into_iter(), 5),
+    ))
 }
 
 fn method_name(method: &str) -> &str {
@@ -409,12 +455,20 @@ mod tests {
                 addresses: 53,
                 top_addresses: vec![("203.0.113.7".into(), 900)],
                 top_users: vec![("root".into(), 400), ("admin".into(), 200)],
+                per_address: vec![("203.0.113.7".into(), 2451), ("192.168.1.9".into(), 288)],
             },
             ..Default::default()
         };
         let check = ssh_attempts(&facts(&ssh, &labels, Some(false)));
         assert_eq!(check.state, State::Atencao);
-        assert!(check.detail.contains("2.739 tentativas de 53 endereços; mais insistentes: 203.0.113.7 (internet, 900); usuários mais tentados: root, admin"));
+        assert!(check.detail.contains("2.739 tentativas de 53 endereços (internet 2.451, rede local 288); mais insistentes: 203.0.113.7 (internet, 900); usuários mais tentados: root, admin"), "{}", check.detail);
+
+        // Só tentativas da rede local (o athena checando a porta 22): sem fail2ban não é problema.
+        let lan_only = SshFacts {
+            attempts_24h: Attempts { total: 288, addresses: 1, per_address: vec![("192.168.1.9".into(), 288)], ..Default::default() },
+            ..Default::default()
+        };
+        assert_eq!(ssh_attempts(&facts(&lan_only, &labels, Some(false))).state, State::Ok);
 
         let banned = Fail2ban { jail: "sshd".into(), currently_banned: 4, total_banned: 12, currently_failed: 0 };
         let mut with_fail2ban = facts(&ssh, &labels, Some(false));
@@ -457,9 +511,20 @@ mod tests {
             mac: mac.into(), ip: "192.168.1.50".into(), vendor: "Espressif".into(), label: String::new(),
             first_seen, last_seen: NOW, connected: true,
         };
-        let check = new_devices(&[device("aa", NOW - 30 * DAY), device("bb", NOW - 3600)], NOW);
-        assert_eq!((check.state, check.detail.as_str()), (State::Atencao, "1 apareceu: Espressif em 192.168.1.50 (bb)"));
-        assert_eq!(new_devices(&[device("aa", NOW - 30 * DAY)], NOW).state, State::Ok);
+        let old = device("00:11:22:33:44:55", NOW - 30 * DAY);
+        let fixed = device("ac:ac:e2:31:83:94", NOW - 3600);
+        let random = device("1a:d0:26:ed:f4:6a", NOW - 3600);
+        let check = new_devices(&[old.clone(), fixed, random.clone()], NOW);
+        assert_eq!(
+            (check.state, check.detail.as_str()),
+            (State::Atencao, "1 apareceu: Espressif em 192.168.1.50 (ac:ac:e2:31:83:94); 1 com MAC aleatório (celulares e notebooks trocam de endereço)")
+        );
+        assert_eq!(new_devices(&[old.clone(), random], NOW).state, State::Ok);
+        assert_eq!(new_devices(&[old], NOW).state, State::Ok);
+        // Nos 3 primeiros dias de registro, só aprende.
+        let check = new_devices(&[device("00:11:22:33:44:55", NOW - DAY), device("ac:ac:e2:31:83:94", NOW - 3600)], NOW);
+        assert_eq!(check.state, State::Ok);
+        assert!(check.detail.starts_with("aprendendo a rede"));
     }
 
     #[test]

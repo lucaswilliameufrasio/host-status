@@ -333,6 +333,7 @@ mod tests {
         assert_eq!(facts.attempts_24h.addresses, 2);
         assert_eq!(facts.attempts_24h.top_addresses[0], ("203.0.113.7".into(), 2));
         assert_eq!(facts.attempts_24h.top_users[0], ("oracle".into(), 2));
+        assert_eq!(facts.attempts_24h.per_address.len(), 2);
         assert_eq!(facts.since_ts, Some(now - 9 * 24 * 3600));
     }
 
@@ -427,6 +428,8 @@ pub struct Attempts {
     pub addresses: i64,
     pub top_addresses: Vec<(String, i64)>,
     pub top_users: Vec<(String, i64)>,
+    /// Todas as origens da janela, para separar internet de rede local e Tailscale.
+    pub per_address: Vec<(String, i64)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -486,8 +489,12 @@ pub fn ssh_facts(conn: &Connection, now: i64) -> rusqlite::Result<SshFacts> {
         "SELECT user, COUNT(*) FROM ssh_events WHERE kind != 'aceito' AND ts >= ?1 AND COALESCE(user, '') != ''
          GROUP BY user ORDER BY COUNT(*) DESC, user LIMIT 5",
     )?;
+    let per_address = top(
+        "SELECT ip, COUNT(*) FROM ssh_events WHERE kind != 'aceito' AND ts >= ?1 AND COALESCE(ip, '') != ''
+         GROUP BY ip ORDER BY COUNT(*) DESC, ip",
+    )?;
     let since_ts = conn.query_row("SELECT MIN(ts) FROM ssh_events", [], |row| row.get(0))?;
-    Ok(SshFacts { identities, attempts_24h: Attempts { total, addresses, top_addresses, top_users }, since_ts })
+    Ok(SshFacts { identities, attempts_24h: Attempts { total, addresses, top_addresses, top_users, per_address }, since_ts })
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
