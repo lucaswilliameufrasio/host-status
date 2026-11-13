@@ -1,0 +1,34 @@
+[Unit]
+Description=host-status: métricas, acessos SSH e proteções desta máquina
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/host-status --config /etc/host-status/config.json --data /var/lib/host-status
+Restart=always
+RestartSec=5
+Nice=10
+# Roda como root para ler o journal do sshd, `sshd -T`, o fail2ban e o dono de cada porta.
+# O resto fica fechado: sistema de arquivos só leitura, exceto a pasta de dados.
+StateDirectory=host-status
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+MemoryMax=64M
+CPUQuota=20%
+
+[Install]
+WantedBy=multi-user.target

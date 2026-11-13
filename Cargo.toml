@@ -1,0 +1,26 @@
+[package]
+name = "host-status"
+version = "0.1.0"
+edition = "2024"
+description = "Status de máquinas macOS e Linux: métricas, SSH e proteções numa página leve"
+license = "Apache-2.0"
+repository = "https://github.com/lucaswilliameufrasio/host-status"
+publish = false
+
+[dependencies]
+bytes = "1.12.1"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["http1", "server"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+libc = "0.2.191"
+rusqlite = { version = "0.42.0", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", default-features = false, features = ["rt", "net", "time", "macros", "sync"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Status do Mac</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main class="page">
+    <header class="card host">
+      <div>
+        <h1 id="title">Status do Mac</h1>
+        <ul class="meta" id="meta">
+          <li><span class="dot" id="live-dot"></span><span id="updated" role="status">Aguardando a primeira coleta</span></li>
+        </ul>
+      </div>
+      <label class="range">
+        <span class="visually-hidden">Período dos gráficos</span>
+        <select id="range">
+          <option value="hour">Última hora</option>
+          <option value="day">Últimas 24 horas</option>
+        </select>
+      </label>
+    </header>
+
+    <section class="modules" id="now" aria-label="Agora"></section>
+
+    <section class="grid" id="charts" aria-label="Histórico"></section>
+
+    <section class="grid wide-only">
+      <div class="column" id="column-left">
+        <article class="card" aria-labelledby="h-posture">
+          <h2 id="h-posture">Acesso remoto e proteção</h2>
+          <p class="sub" id="posture-summary">Checagens do SSH, compartilhamento e proteções do macOS</p>
+          <div id="posture"></div>
+        </article>
+        <article class="card" id="cleanup-card" aria-labelledby="h-cleanup">
+          <h2 id="h-cleanup">Limpeza</h2>
+          <p class="sub">O que o acari achou no disco</p>
+          <div id="cleanup"></div>
+        </article>
+      </div>
+      <div class="column" id="column-right">
+        <article class="card" aria-labelledby="h-processes">
+          <h2 id="h-processes">Processos</h2>
+          <p class="sub">Os que mais usam CPU agora</p>
+          <div id="processes"></div>
+        </article>
+        <article class="card" id="ports-card" aria-labelledby="h-listeners">
+          <h2 id="h-listeners">Portas abertas para a rede</h2>
+          <p class="sub" id="ports-sub">TCP fora do loopback.</p>
+          <div id="listeners"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="card" id="devices-card" aria-labelledby="h-devices" hidden>
+      <h2 id="h-devices">Aparelhos na rede</h2>
+      <p class="sub">Tabela ARP depois de um ping na rede local. Não é o DHCP do roteador: aparelho que não responde ARP não aparece.</p>
+      <div id="devices"></div>
+    </section>
+
+    <section class="card" aria-labelledby="h-ssh">
+      <h2 id="h-ssh">SSH</h2>
+      <p class="sub" id="ssh-summary">Entradas e tentativas registradas pelo sshd</p>
+      <div class="ssh-layout">
+        <div>
+          <h3 class="first">Últimos acessos</h3>
+          <div id="ssh-events"></div>
+        </div>
+        <div>
+          <h3 class="first">Origens nos últimos 7 dias</h3>
+          <div id="ssh-origins"></div>
+          <h3>Sessões abertas</h3>
+          <div id="ssh-sessions"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+  <script src="/app.js"></script>
+  <noscript>O painel precisa de JavaScript para ler o JSON local.</noscript>
+</body>
+</html>
