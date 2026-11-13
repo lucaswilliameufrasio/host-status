@@ -34,6 +34,7 @@ pub fn prepare(conn: &Connection) -> rusqlite::Result<()> {
             kind TEXT NOT NULL, method TEXT, user TEXT, ip TEXT, key TEXT
         );
         CREATE INDEX IF NOT EXISTS ssh_events_ts ON ssh_events (ts);
+        CREATE INDEX IF NOT EXISTS ssh_events_kind ON ssh_events (kind, ts);
         CREATE TABLE IF NOT EXISTS devices (
             mac TEXT PRIMARY KEY, ip TEXT, vendor TEXT, label TEXT,
             first_seen INTEGER, last_seen INTEGER, last_state TEXT
