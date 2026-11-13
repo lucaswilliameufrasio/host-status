@@ -121,9 +121,25 @@ fn temperature() -> Option<f64> {
         .map(|value| store::round(value, 1))
 }
 
+/// Entradas do journal do sshd lidas por ciclo.
+const JOURNAL_BATCH: usize = 5000;
+
 pub fn read_ssh(conn: &Connection) -> (Vec<SshEvent>, Option<String>) {
     let cursor = store::meta_get(conn, "ssh_cursor");
-    let mut args = vec!["-o", "json", "--no-pager", "SYSLOG_IDENTIFIER=sshd", "SYSLOG_IDENTIFIER=sshd-session", "SYSLOG_IDENTIFIER=sshd-auth"];
+    // Só os campos usados (o cursor e o timestamp sempre vêm) e no máximo JOURNAL_BATCH entradas:
+    // num servidor exposto, uma semana de tentativas em JSON completo passava dos 64 MB do unit.
+    // Num pico maior que o lote, ficam as mais recentes e o cursor avança.
+    let lines = format!("--lines={JOURNAL_BATCH}");
+    let mut args = vec![
+        "-o",
+        "json",
+        "--output-fields=MESSAGE",
+        lines.as_str(),
+        "--no-pager",
+        "SYSLOG_IDENTIFIER=sshd",
+        "SYSLOG_IDENTIFIER=sshd-session",
+        "SYSLOG_IDENTIFIER=sshd-auth",
+    ];
     let after;
     match &cursor {
         Some(value) => {
