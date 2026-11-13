@@ -11,6 +11,7 @@ const SAMPLE_RETENTION: i64 = 30 * 24 * 3600;
 const EVENT_RETENTION: i64 = 90 * 24 * 3600;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const DEVICE_RETENTION: i64 = 180 * 24 * 3600;
+const LISTENER_RETENTION: i64 = 30 * 24 * 3600;
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
@@ -33,9 +34,15 @@ pub fn prepare(conn: &Connection) -> rusqlite::Result<()> {
             kind TEXT NOT NULL, method TEXT, user TEXT, ip TEXT, key TEXT
         );
         CREATE INDEX IF NOT EXISTS ssh_events_ts ON ssh_events (ts);
+        CREATE INDEX IF NOT EXISTS ssh_events_kind ON ssh_events (kind, ts);
         CREATE TABLE IF NOT EXISTS devices (
             mac TEXT PRIMARY KEY, ip TEXT, vendor TEXT, label TEXT,
             first_seen INTEGER, last_seen INTEGER, last_state TEXT
+        );
+        CREATE TABLE IF NOT EXISTS listeners_seen (
+            port INTEGER NOT NULL, address TEXT NOT NULL, process TEXT,
+            first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL,
+            PRIMARY KEY (port, address)
         );
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);",
     )
@@ -295,6 +302,53 @@ mod tests {
         }
     }
 
+    fn ssh(uid: &str, ts: i64, kind: &str, user: &str, ip: &str, method: &str, key: &str) -> SshEvent {
+        SshEvent { uid: uid.into(), ts, kind: kind.into(), method: method.into(), user: user.into(), ip: ip.into(), key: key.into() }
+    }
+
+    #[test]
+    fn facts_group_logins_and_attempts() {
+        let conn = memory();
+        let now = 10 * 24 * 3600;
+        let events = vec![
+            ssh("a", now - 9 * 24 * 3600, "aceito", "admin", "192.0.2.1", "publickey", "SHA256:k1"),
+            ssh("b", now - 3600, "aceito", "admin", "192.0.2.1", "publickey", "SHA256:k1"),
+            ssh("c", now - 1800, "aceito", "admin", "192.0.2.1", "publickey", "SHA256:k1"),
+            ssh("d", now - 600, "aceito", "admin", "100.64.0.5", "publickey", "SHA256:k1"),
+            ssh("e", now - 500, "aceito", "deploy", "192.0.2.9", "password", ""),
+            ssh("f", now - 400, "usuario_invalido", "oracle", "203.0.113.7", "", ""),
+            ssh("g", now - 300, "usuario_invalido", "oracle", "203.0.113.7", "", ""),
+            ssh("h", now - 200, "falha", "root", "203.0.113.8", "password", ""),
+            ssh("i", now - 2 * 24 * 3600, "falha", "root", "203.0.113.9", "password", ""),
+        ];
+        record(&conn, now, &Sample::default(), &events).unwrap();
+        let facts = ssh_facts(&conn, now).unwrap();
+        assert_eq!(facts.identities.len(), 2);
+        let admin = facts.identities.iter().find(|item| item.user == "admin").unwrap();
+        assert_eq!((admin.entries, admin.key.as_str()), (3, "SHA256:k1"));
+        assert_eq!(admin.origins[0], OriginCount { ip: "192.0.2.1".into(), entries: 2, first_ts: now - 9 * 24 * 3600 });
+        assert_eq!(admin.origins[1].ip, "100.64.0.5");
+        assert_eq!(facts.identities.iter().find(|item| item.user == "deploy").unwrap().method, "password");
+        assert_eq!(facts.attempts_24h.total, 3);
+        assert_eq!(facts.attempts_24h.addresses, 2);
+        assert_eq!(facts.attempts_24h.top_addresses[0], ("203.0.113.7".into(), 2));
+        assert_eq!(facts.attempts_24h.top_users[0], ("oracle".into(), 2));
+        assert_eq!(facts.attempts_24h.per_address.len(), 2);
+        assert_eq!(facts.since_ts, Some(now - 9 * 24 * 3600));
+    }
+
+    #[test]
+    fn listeners_keep_first_seen() {
+        let conn = memory();
+        let ssh_port = crate::model::Listener { port: 22, address: "todas as interfaces".into(), process: "sshd".into() };
+        let db = crate::model::Listener { port: 5432, address: "todas as interfaces".into(), process: "postgres".into() };
+        let (open, baseline) = record_listeners(&conn, 1000, std::slice::from_ref(&ssh_port)).unwrap();
+        assert_eq!((open.len(), baseline), (1, 1000));
+        let (open, baseline) = record_listeners(&conn, 2000, &[ssh_port, db]).unwrap();
+        assert_eq!(baseline, 1000);
+        assert_eq!(open.iter().map(|item| (item.port, item.first_seen)).collect::<Vec<_>>(), vec![(22, 1000), (5432, 2000)]);
+    }
+
     #[test]
     fn rate() {
         assert_eq!(rate_bps(Some(1000), Some(2000), 60.0), Some(133.3));
@@ -346,4 +400,127 @@ mod tests {
         meta_set(&conn, "x", "2").unwrap();
         assert_eq!(meta_get(&conn, "x").as_deref(), Some("2"));
     }
+}
+
+/// Quem entrou: um par usuário + chave + método, com as origens de onde veio.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Identity {
+    pub user: String,
+    pub key: String,
+    pub method: String,
+    pub entries: i64,
+    pub last_ts: i64,
+    pub origins: Vec<OriginCount>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct OriginCount {
+    pub ip: String,
+    pub entries: i64,
+    /// Primeira entrada aceita desta origem em todo o histórico guardado.
+    pub first_ts: i64,
+}
+
+/// Tentativas sem login numa janela.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Attempts {
+    pub total: i64,
+    pub addresses: i64,
+    pub top_addresses: Vec<(String, i64)>,
+    pub top_users: Vec<(String, i64)>,
+    /// Todas as origens da janela, para separar internet de rede local e Tailscale.
+    pub per_address: Vec<(String, i64)>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct SshFacts {
+    pub identities: Vec<Identity>,
+    pub attempts_24h: Attempts,
+    pub since_ts: Option<i64>,
+}
+
+pub fn ssh_facts(conn: &Connection, now: i64) -> rusqlite::Result<SshFacts> {
+    let week = now - 7 * 24 * 3600;
+    let mut first_by_ip = std::collections::HashMap::new();
+    let mut statement = conn.prepare_cached("SELECT ip, MIN(ts) FROM ssh_events WHERE kind = 'aceito' GROUP BY ip")?;
+    for row in statement.query_map([], |row| Ok((row.get::<_, Option<String>>(0)?.unwrap_or_default(), row.get::<_, i64>(1)?)))? {
+        let (ip, first) = row?;
+        first_by_ip.insert(ip, first);
+    }
+    let mut statement = conn.prepare_cached(
+        "SELECT COALESCE(user, ''), COALESCE(key, ''), COALESCE(method, ''), COALESCE(ip, ''), COUNT(*), MAX(ts)
+         FROM ssh_events WHERE kind = 'aceito' AND ts >= ?1
+         GROUP BY 1, 2, 3, 4 ORDER BY MAX(ts) DESC",
+    )?;
+    let mut identities: Vec<Identity> = Vec::new();
+    for row in statement.query_map([week], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?))
+    })? {
+        let (user, key, method, ip, entries, last_ts) = row?;
+        let origin = OriginCount { first_ts: first_by_ip.get(&ip).copied().unwrap_or(last_ts), ip, entries };
+        match identities.iter_mut().find(|item| item.user == user && item.key == key && item.method == method) {
+            Some(item) => {
+                item.entries += entries;
+                item.last_ts = item.last_ts.max(last_ts);
+                item.origins.push(origin);
+            }
+            None => identities.push(Identity { user, key, method, entries, last_ts, origins: vec![origin] }),
+        }
+    }
+    for item in &mut identities {
+        item.origins.sort_by(|a, b| b.entries.cmp(&a.entries).then_with(|| a.ip.cmp(&b.ip)));
+    }
+
+    let day = now - 24 * 3600;
+    let (total, addresses) = conn.query_row(
+        "SELECT COUNT(*), COUNT(DISTINCT ip) FROM ssh_events WHERE kind != 'aceito' AND ts >= ?1",
+        [day],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    )?;
+    let top = |sql: &str| -> rusqlite::Result<Vec<(String, i64)>> {
+        let mut statement = conn.prepare_cached(sql)?;
+        statement.query_map([day], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?.collect()
+    };
+    let top_addresses = top(
+        "SELECT ip, COUNT(*) FROM ssh_events WHERE kind != 'aceito' AND ts >= ?1 AND COALESCE(ip, '') != ''
+         GROUP BY ip ORDER BY COUNT(*) DESC, ip LIMIT 3",
+    )?;
+    let top_users = top(
+        "SELECT user, COUNT(*) FROM ssh_events WHERE kind != 'aceito' AND ts >= ?1 AND COALESCE(user, '') != ''
+         GROUP BY user ORDER BY COUNT(*) DESC, user LIMIT 5",
+    )?;
+    let per_address = top(
+        "SELECT ip, COUNT(*) FROM ssh_events WHERE kind != 'aceito' AND ts >= ?1 AND COALESCE(ip, '') != ''
+         GROUP BY ip ORDER BY COUNT(*) DESC, ip",
+    )?;
+    let since_ts = conn.query_row("SELECT MIN(ts) FROM ssh_events", [], |row| row.get(0))?;
+    Ok(SshFacts { identities, attempts_24h: Attempts { total, addresses, top_addresses, top_users, per_address }, since_ts })
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SeenListener {
+    pub port: u16,
+    pub address: String,
+    pub process: String,
+    pub first_seen: i64,
+}
+
+/// Guarda quando cada porta apareceu. Devolve as abertas agora e o início do registro.
+pub fn record_listeners(conn: &Connection, now: i64, listeners: &[crate::model::Listener]) -> rusqlite::Result<(Vec<SeenListener>, i64)> {
+    for item in listeners {
+        conn.execute(
+            "INSERT INTO listeners_seen (port, address, process, first_seen, last_seen) VALUES (?1, ?2, ?3, ?4, ?4)
+             ON CONFLICT(port, address) DO UPDATE SET process = excluded.process, last_seen = excluded.last_seen",
+            params![item.port, item.address, item.process, now],
+        )?;
+    }
+    conn.execute("DELETE FROM listeners_seen WHERE last_seen < ?1", [now - LISTENER_RETENTION])?;
+    let baseline: i64 = conn.query_row("SELECT COALESCE(MIN(first_seen), ?1) FROM listeners_seen", [now], |row| row.get(0))?;
+    let mut statement = conn.prepare_cached(
+        "SELECT port, address, COALESCE(process, ''), first_seen FROM listeners_seen WHERE last_seen = ?1 ORDER BY port",
+    )?;
+    let open = statement
+        .query_map([now], |row| Ok(SeenListener { port: row.get(0)?, address: row.get(1)?, process: row.get(2)?, first_seen: row.get(3)? }))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok((open, baseline))
 }

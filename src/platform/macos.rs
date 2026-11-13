@@ -338,3 +338,17 @@ pub fn diagnose() -> Vec<String> {
 
     ]
 }
+
+/// O macOS não tem systemd: não se aplica.
+pub fn failed_units() -> Option<Vec<String>> {
+    None
+}
+
+pub fn oom_kills() -> Option<Vec<(String, i64)>> {
+    None
+}
+
+/// Roda como o usuário (LaunchAgent): só as chaves dele.
+pub fn key_labels() -> std::collections::HashMap<String, String> {
+    std::env::var_os("HOME").map(|home| util::key_labels(&[PathBuf::from(home)])).unwrap_or_default()
+}

@@ -3,7 +3,8 @@
 use crate::config::Config;
 use crate::model::{Live, Sample};
 use crate::platform::{self, Sampler};
-use crate::{checks, ssh, store, util};
+use crate::model::State;
+use crate::{checks, insights, ssh, store, util};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -76,7 +77,8 @@ pub fn full_document(conn: &Connection, config: &Config, now: i64, sample: Sampl
     ssh_view["sessions"] = json!(ssh::parse_who(&util::run("who", &[], Duration::from_secs(5)).unwrap_or_default()));
     ssh_view["error"] = json!(ssh_error);
     let mut posture = platform::posture(config);
-    posture.extend(checks::service_checks(&config.services));
+    let listeners = platform::listeners();
+    posture.extend(checks::service_checks(&config.services, &listeners));
     let extras = platform::extras(conn, now, &sample, config);
     let memory_labels: Vec<String> = sample
         .memory
@@ -84,6 +86,30 @@ pub fn full_document(conn: &Connection, config: &Config, now: i64, sample: Sampl
         .map(|memory| memory.parts.iter().take(3).map(|part| part.label.clone()).collect())
         .unwrap_or_default();
     let network = network(sample.gateway.as_deref());
+    let (seen_listeners, listeners_since) = store::record_listeners(conn, now, &listeners)?;
+    let ssh_facts = store::ssh_facts(conn, now)?;
+    let key_labels = platform::key_labels();
+    let failed_units = platform::failed_units();
+    let oom_kills = platform::oom_kills();
+    let password_login = posture.iter().find(|item| item.id == "ssh_senha").and_then(|item| match item.state {
+        State::Ok => Some(false),
+        State::Problema => Some(true),
+        _ => None,
+    });
+    let facts = insights::Facts {
+        now,
+        ssh: &ssh_facts,
+        key_labels: &key_labels,
+        password_login,
+        fail2ban: extras.fail2ban.as_ref(),
+        failed_units: failed_units.as_deref(),
+        oom_kills: oom_kills.as_deref(),
+        listeners: &seen_listeners,
+        listeners_since,
+        devices: extras.devices.as_deref(),
+    };
+    let readings = insights::readings(&facts);
+    ssh_view["who"] = json!(insights::who(&facts));
     let mut document = json!({
         "generated_at": now,
         "platform": platform::NAME,
@@ -96,7 +122,8 @@ pub fn full_document(conn: &Connection, config: &Config, now: i64, sample: Sampl
         "ssh": ssh_view,
         "posture": posture,
         "network": network,
-        "listeners": platform::listeners(),
+        "listeners": listeners,
+        "readings": readings,
         "processes": platform::processes(),
         "acari": acari(conn, now, config.acari.clone().or_else(platform::default_acari).as_deref()),
         "tailscale": {"state": platform::tailscale_state()},

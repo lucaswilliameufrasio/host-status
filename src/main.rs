@@ -2,6 +2,7 @@ mod checks;
 mod collector;
 mod config;
 mod http;
+mod insights;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod linux;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
