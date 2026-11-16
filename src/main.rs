@@ -1,3 +1,4 @@
+mod build_info;
 mod checks;
 mod collector;
 mod config;

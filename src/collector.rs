@@ -112,6 +112,7 @@ pub fn full_document(conn: &Connection, config: &Config, now: i64, sample: Sampl
     ssh_view["who"] = json!(insights::who(&facts));
     let mut document = json!({
         "generated_at": now,
+        "build": crate::build_info::current(),
         "platform": platform::NAME,
         "host": platform::host_info(config),
         "memory_labels": memory_labels,

@@ -78,6 +78,17 @@ host-status [--config ARQUIVO] [--data PASTA] [--once] [--check-config] [--diagn
 
 Rotas: `/`, `/app.js`, `/app.css`, `/live.json` (5 s), `/current.json` (1 min). Só GET e HEAD, sem cache, com `Content-Security-Policy: default-src 'self'`.
 
+O cabeçalho e `/current.json` mostram a versão e o commit registrados na compilação.
+O commit indica o `HEAD` da cópia usada, não uma prova independente da origem do binário;
+alterações locais, inclusive arquivos não rastreados, são sinalizadas. Sem Git ou fora de
+um checkout, o commit e o estado do código ficam desconhecidos. Compile novamente depois
+de alterar ou registrar o código para atualizar esses dados.
+
+No Linux, a lista de portas vem de uma consulta local ao `ss`, não de uma varredura da
+rede. A descoberta ativa de aparelhos com `fping` só é executada com `lan_devices: true`;
+serviços configurados podem receber conexões TCP pontuais, e os testes de conectividade
+usam gateway, DNS e internet.
+
 ## Construir
 
 ```bash

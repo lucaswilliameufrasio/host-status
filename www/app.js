@@ -378,6 +378,20 @@ function renderHost(data) {
   if (host.os) items.push(host.os);
   if (host.chip) items.push(host.chip + (host.cores ? ", " + host.cores + " núcleos" : ""));
   if (host.boot_ts) items.push("ligado há " + duration(data.generated_at - host.boot_ts));
+  if (data.build && data.build.version) {
+    let build = "host-status " + data.build.version;
+    if (data.build.commit) {
+      build += " (" + data.build.commit.slice(0, 12) + ")";
+    } else {
+      build += " (commit desconhecido)";
+    }
+    if (data.build.dirty === true) {
+      build += " — alterações locais";
+    } else if (data.build.dirty === undefined) {
+      build += " — estado do código desconhecido";
+    }
+    items.push(build);
+  }
   const meta = document.getElementById("meta");
   meta.replaceChildren(meta.firstElementChild, ...items.map((text) => el("li", text)));
 }
@@ -835,7 +849,7 @@ function renderDevices(data) {
 function renderLists(data) {
   document.getElementById("ports-sub").textContent = data.platform === "macos"
     ? "TCP fora do loopback. Processos de outros usuários e do sistema aparecem como serviço do sistema."
-    : "TCP fora do loopback, com o processo dono de cada porta.";
+    : "TCP fora do loopback, consultado localmente com ss; não é uma varredura de rede.";
   const busiest = Math.max(1, ...data.processes.map((item) => item.cpu_pct));
   replace("processes", table(
     [{ label: "Processo" }, { label: "CPU", width: "140px" }, { label: "Memória", numeric: true }],
